@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
 const ptp = require('pdf-to-printer');
@@ -66,21 +66,93 @@ async function printPdf(pdfPath, printerName) {
     return ptp.print(pdfPath, options);
 }
 
+function findInstalledBrowser() {
+    if (process.platform === 'win32') {
+        const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
+        const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+        const localAppData = process.env['LOCALAPPDATA'] || '';
+
+        const candidates = [
+            // Google Chrome
+            path.join(programFiles, 'Google\\Chrome\\Application\\chrome.exe'),
+            path.join(programFilesX86, 'Google\\Chrome\\Application\\chrome.exe'),
+            path.join(localAppData, 'Google\\Chrome\\Application\\chrome.exe'),
+            // Microsoft Edge (bawaan Windows 10 & 11)
+            path.join(programFilesX86, 'Microsoft\\Edge\\Application\\msedge.exe'),
+            path.join(programFiles, 'Microsoft\\Edge\\Application\\msedge.exe'),
+            path.join(localAppData, 'Microsoft\\Edge\\Application\\msedge.exe'),
+        ];
+
+        for (const candidate of candidates) {
+            if (candidate && fs.existsSync(candidate)) {
+                return candidate;
+            }
+        }
+    } else if (process.platform === 'darwin') {
+        const macCandidates = [
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+            '/Applications/Chromium.app/Contents/MacOS/Chromium'
+        ];
+        for (const candidate of macCandidates) {
+            if (fs.existsSync(candidate)) {
+                return candidate;
+            }
+        }
+    } else if (process.platform === 'linux') {
+        const linuxCandidates = [
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium'
+        ];
+        for (const candidate of linuxCandidates) {
+            if (fs.existsSync(candidate)) {
+                return candidate;
+            }
+        }
+    }
+    return null;
+}
+
 function getBrowserLaunchOptions() {
-    const options = { headless: true };
+    const options = {
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    };
     const configuredPath = process.env.PUPPETEER_EXECUTABLE_PATH;
 
     if (configuredPath) {
-        options.executablePath = configuredPath;
-    } else if (process.platform === 'darwin') {
-        const macChromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-        if (!fs.existsSync(macChromePath)) {
-            throw new Error(`Google Chrome tidak ditemukan di ${macChromePath}. Set PUPPETEER_EXECUTABLE_PATH ke lokasi Chrome.`);
+        if (!fs.existsSync(configuredPath)) {
+            throw new Error(`Browser tidak ditemukan di ${configuredPath}. Pastikan PUPPETEER_EXECUTABLE_PATH sudah benar.`);
         }
-        options.executablePath = macChromePath;
+        options.executablePath = configuredPath;
+        return options;
     }
 
-    return options;
+    // 1. Cek Chromium bawaan Puppeteer
+    try {
+        const defaultPath = puppeteer.executablePath();
+        if (defaultPath && fs.existsSync(defaultPath)) {
+            options.executablePath = defaultPath;
+            return options;
+        }
+    } catch {
+        // Lanjut ke browser yang terpasang di sistem
+    }
+
+    // 2. Fallback otomatis: Gunakan Google Chrome atau Microsoft Edge yang terinstall di OS
+    const installedPath = findInstalledBrowser();
+    if (installedPath) {
+        console.log(`Chromium bawaan Puppeteer tidak ditemukan. Menggunakan browser sistem: ${installedPath}`);
+        options.executablePath = installedPath;
+        return options;
+    }
+
+    throw new Error(
+        'Tidak ditemukan Google Chrome, Microsoft Edge, atau Chromium di komputer ini. ' +
+        'Silakan install Google Chrome atau set path browser di environment variable PUPPETEER_EXECUTABLE_PATH.'
+    );
 }
 
 // Log requests without recording document HTML, URLs, or other print payloads.
